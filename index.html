@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📺 Tablero de Incidencias - HULA</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0f172a;
+            padding: 30px;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            color: white;
+            border-bottom: 2px solid #1e293b;
+            padding-bottom: 15px;
+        }
+        .header h1 { font-size: 2.5rem; font-weight: 300; }
+        .header .info { font-size: 1.2rem; color: #94a3b8; }
+        .header .info span {
+            background: #1e293b;
+            padding: 8px 20px;
+            border-radius: 30px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+            flex: 1;
+        }
+        .ticket-card {
+            background: #1e293b;
+            border-radius: 12px;
+            padding: 20px 24px;
+            border-left: 6px solid #f59e0b;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.3);
+            color: #e2e8f0;
+            transition: transform 0.2s;
+        }
+        .ticket-card:hover { transform: scale(1.02); }
+        .ticket-card .usuario {
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: #f1f5f9;
+            margin-bottom: 4px;
+        }
+        .ticket-card .incidencia {
+            font-size: 1rem;
+            color: #cbd5e1;
+            margin: 8px 0;
+            line-height: 1.4;
+        }
+        .ticket-card .tecnico {
+            font-size: 0.95rem;
+            color: #94a3b8;
+            margin-top: 8px;
+        }
+        .ticket-card .tecnico strong { color: #60a5fa; }
+        .ticket-card .estado-badge {
+            display: inline-block;
+            padding: 4px 16px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-top: 10px;
+        }
+        .estado-pendiente { background: #f59e0b; color: #0f172a; }
+        .footer {
+            margin-top: 30px;
+            color: #475569;
+            text-align: center;
+            font-size: 0.9rem;
+            border-top: 1px solid #1e293b;
+            padding-top: 20px;
+        }
+        .empty-state {
+            color: #64748b;
+            font-size: 2rem;
+            text-align: center;
+            grid-column: 1 / -1;
+            padding: 60px 0;
+        }
+        .ticket-card .fecha {
+            font-size: 0.75rem;
+            color: #64748b;
+            margin-top: 8px;
+        }
+        .notificacion {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background: #10b981;
+            color: white;
+            padding: 15px 25px;
+            border-radius: 10px;
+            font-weight: 600;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.3);
+            transform: translateY(120%);
+            transition: transform 0.5s ease;
+            z-index: 1000;
+        }
+        .notificacion.mostrar { transform: translateY(0); }
+        .loading {
+            text-align: center;
+            color: #64748b;
+            padding: 60px 0;
+            grid-column: 1 / -1;
+        }
+        .spinner {
+            display: inline-block;
+            width: 40px;
+            height: 40px;
+            border: 4px solid #1e293b;
+            border-top-color: #60a5fa;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @media (max-width: 768px) {
+            .header h1 { font-size: 1.8rem; }
+            .grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📋 Incidencias HULA</h1>
+        <div class="info"><span id="contador">0 activas</span></div>
+    </div>
+    <div class="grid" id="ticketGrid">
+        <div class="loading">
+            <div class="spinner"></div>
+            <p style="margin-top:20px;">Cargando incidencias...</p>
+        </div>
+    </div>
+    <div class="footer">
+        <span class="refresco">🔄 Actualización automática cada 10 segundos · Google Sheets</span>
+    </div>
+    <div id="notificacion" class="notificacion">🔔 Nueva incidencia</div>
+
+    <script>
+        // 🔑 URL DE TU APPS SCRIPT (ACTUALIZADA)
+        const API_URL = 'https://script.google.com/macros/s/AKfycbySZb0mh-8kWekpd-HHMxwMzdjuMCzfwsp4ssjsBDw-KnFJ9URNVv3n7qOOj_8Dqa0r/exec';
+        let ultimoTicketId = null;
+
+        function mostrarNotificacion() {
+            const notif = document.getElementById('notificacion');
+            notif.classList.add('mostrar');
+            setTimeout(() => notif.classList.remove('mostrar'), 3000);
+        }
+
+        async function cargarTickets() {
+            try {
+                const response = await fetch(API_URL);
+                const data = await response.json();
+                
+                let tickets = [];
+                if (data && data.success && data.data) {
+                    if (Array.isArray(data.data)) {
+                        tickets = data.data;
+                    } else if (data.data && data.data.data && Array.isArray(data.data.data)) {
+                        tickets = data.data.data;
+                    } else if (typeof data.data === 'object' && data.data !== null) {
+                        for (let key in data.data) {
+                            if (Array.isArray(data.data[key])) {
+                                tickets = data.data[key];
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                if (tickets.length === 0 && Array.isArray(data)) {
+                    tickets = data;
+                }
+                
+                renderTickets(tickets);
+            } catch (error) {
+                console.error('Error:', error);
+                document.getElementById('ticketGrid').innerHTML = `
+                    <div class="empty-state" style="color:#ef4444;">
+                        ❌ Error de conexión<br>
+                        <span style="font-size:1rem;color:#64748b;">
+                            Asegúrate de que el script está publicado<br>
+                            <a href="${API_URL}" target="_blank" style="color:#60a5fa;">Probar API</a>
+                        </span>
+                    </div>
+                `;
+            }
+        }
+
+        function renderTickets(tickets) {
+            const grid = document.getElementById('ticketGrid');
+            const contador = document.getElementById('contador');
+            
+            const pendientes = tickets.filter(t => (t.estado || '').toLowerCase().trim() === 'pendiente');
+            const resueltos = tickets.filter(t => (t.estado || '').toLowerCase().trim() === 'resuelto');
+
+            if (pendientes.length > 0 && pendientes[0].id !== ultimoTicketId) {
+                ultimoTicketId = pendientes[0].id;
+                mostrarNotificacion();
+            }
+
+            contador.textContent = `${pendientes.length} activas`;
+
+            if (pendientes.length === 0) {
+                grid.innerHTML = `
+                    <div class="empty-state">
+                        ✅ ${resueltos.length > 0 ? 'Todas resueltas' : 'Sin incidencias'}
+                        ${resueltos.length > 0 ? `<br><span style="font-size:1rem;color:#475569;">Última resuelta: ${new Date(resueltos[resueltos.length-1].fecha).toLocaleTimeString()}</span>` : ''}
+                    </div>
+                `;
+                return;
+            }
+
+            grid.innerHTML = pendientes.map(ticket => `
+                <div class="ticket-card">
+                    <div class="usuario">👤 ${ticket.usuario || 'Sin usuario'}</div>
+                    <div class="incidencia">📌 ${ticket.incidencia || 'Sin descripción'}</div>
+                    <div class="tecnico">👨‍💻 Asignado a: <strong>${ticket.tecnico || 'Sin asignar'}</strong></div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:12px;">
+                        <span class="estado-badge estado-pendiente">⏳ Pendiente</span>
+                        <span class="fecha">${ticket.fecha ? new Date(ticket.fecha).toLocaleTimeString() : 'Sin fecha'}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        cargarTickets();
+        setInterval(cargarTickets, 10000);
+    </script>
+</body>
+</html>
